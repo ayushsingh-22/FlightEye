@@ -72,8 +72,6 @@
 
 ## 📄 License
 
-MIT License - feel free to use, contribute, and modify this app as needed.
+Feel free to use, contribute, and modify this app as needed.
 
 ---
-
-> ✨ Made with ❤️ using Kotlin + Jetpack Compose
