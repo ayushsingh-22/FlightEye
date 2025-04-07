@@ -24,14 +24,13 @@ import androidx.compose.ui.viewinterop.AndroidView
 import androidx.navigation.NavController
 import com.example.flighteye.activity.PiPActivity
 import com.example.flighteye.player.VLCPlayerManager
-import com.example.flighteye.player.VLCPlayerManagerSingleton
 import org.videolan.libvlc.util.VLCVideoLayout
 
 @Composable
 fun PopUpScreen(navController: NavController) {
     val context = LocalContext.current
     val videoLayout = remember { VLCVideoLayout(context) }
-    val playerManager = remember { VLCPlayerManagerSingleton.getInstance(context) }
+    val playerManager = remember { VLCPlayerManager(context) }
 
     val rtspUrl by remember { mutableStateOf("rtsp://192.168.1.2:5540/ch0") }
 
@@ -40,11 +39,10 @@ fun PopUpScreen(navController: NavController) {
         playerManager.playStream(rtspUrl)
     }
 
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .padding(16.dp)
-    ) {
+    Column(modifier = Modifier
+        .fillMaxSize()
+        .padding(16.dp)) {
+
         Text("Pop-Up Stream", style = MaterialTheme.typography.headlineSmall)
         Spacer(modifier = Modifier.height(8.dp))
 
@@ -57,9 +55,7 @@ fun PopUpScreen(navController: NavController) {
 
         Spacer(modifier = Modifier.height(16.dp))
 
-        // ✅ Modified Button with detachSurface() call
         Button(onClick = {
-            playerManager.detachSurface() // 🔄 Detach before new view
             val pipIntent = Intent(context, PiPActivity::class.java)
             pipIntent.putExtra("rtsp_url", rtspUrl)
             context.startActivity(pipIntent)
@@ -77,3 +73,4 @@ fun PopUpScreen(navController: NavController) {
         }
     }
 }
+

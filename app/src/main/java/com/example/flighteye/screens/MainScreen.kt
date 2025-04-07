@@ -4,11 +4,25 @@ import android.annotation.SuppressLint
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
 import androidx.compose.material3.Button
 import androidx.compose.material3.Text
-import androidx.compose.runtime.*
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
@@ -17,7 +31,7 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.navigation.NavController
 import com.example.flighteye.component.StreamInputField
-import com.example.flighteye.player.VLCPlayerManagerSingleton
+import com.example.flighteye.player.VLCPlayerManager
 import com.example.flighteye.utils.FileUtils
 import com.example.flighteye.utils.PermissionsUtils
 import org.videolan.libvlc.util.VLCVideoLayout
@@ -44,20 +58,15 @@ fun MainScreen(navController: NavController) {
     }
 
     val videoLayout = remember { VLCVideoLayout(context) }
-    val playerManager = remember { VLCPlayerManagerSingleton.getInstance(context) }
+    val playerManager = remember { VLCPlayerManager(context) }
 
     var rtspUrl by rememberSaveable { mutableStateOf("") }
     var isPlaying by rememberSaveable { mutableStateOf(false) }
     var isRecording by rememberSaveable { mutableStateOf(false) }
 
-    // ✅ Attach surface and auto-resume if already streaming
+    // Attach surface once
     LaunchedEffect(Unit) {
         playerManager.attachSurface(videoLayout)
-
-        // Auto-play if player was streaming
-        if (playerManager.isPlaying()) {
-            isPlaying = true
-        }
     }
 
     Column(
@@ -69,9 +78,10 @@ fun MainScreen(navController: NavController) {
         Text(
             text = "Flight Eye Player",
             fontWeight = FontWeight.W500,
-            fontSize = 25.sp
-        )
+            fontSize = 25.sp,
 
+            )
+        // RTSP Input
         StreamInputField(
             url = rtspUrl,
             onUrlChange = { rtspUrl = it }
@@ -79,6 +89,7 @@ fun MainScreen(navController: NavController) {
 
         Spacer(modifier = Modifier.height(16.dp))
 
+        // VLC Player Surface
         AndroidView(
             factory = { videoLayout },
             modifier = Modifier
@@ -111,7 +122,7 @@ fun MainScreen(navController: NavController) {
                         playerManager.playStream(rtspUrl)
                     }
 
-                    isPlaying = true
+                    isPlaying = true // ✅ Mark that streaming started
                 }) {
                     Text(if (isRecording) "Record & Play" else "Play")
                 }
@@ -126,15 +137,14 @@ fun MainScreen(navController: NavController) {
 
                 Spacer(modifier = Modifier.width(8.dp))
 
+                // ✅ STOP BUTTON (Visible only when streaming)
                 if (isPlaying) {
                     Button(onClick = {
                         playerManager.stopPlayback()
-                        playerManager.releasePlayer() // ✅ Release memory
                         Toast.makeText(context, "Streaming Stopped", Toast.LENGTH_SHORT).show()
                         isPlaying = false
-                        isRecording = false
-                    })
-                    {
+                        isRecording = false // Optionally turn off recording too
+                    }) {
                         Text("Stop")
                     }
                 }
@@ -152,3 +162,4 @@ fun MainScreen(navController: NavController) {
         }
     }
 }
+

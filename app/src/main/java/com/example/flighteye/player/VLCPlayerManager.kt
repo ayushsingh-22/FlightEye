@@ -7,90 +7,45 @@ import org.videolan.libvlc.Media
 import org.videolan.libvlc.MediaPlayer
 import org.videolan.libvlc.util.VLCVideoLayout
 
-class VLCPlayerManager(private val context: Context) {
+class VLCPlayerManager(context: Context) {
 
-    private var libVLC: LibVLC? = LibVLC(context, VLCConfig.getDefaultOptions())
-    private var mediaPlayer: MediaPlayer? = MediaPlayer(libVLC)
-    private var media: Media? = null
+    var libVLC: LibVLC = LibVLC(context, VLCConfig.getDefaultOptions())
+    var mediaPlayer: MediaPlayer = MediaPlayer(libVLC)
 
-    private var isSurfaceAttached = false
+
 
     fun attachSurface(videoLayout: VLCVideoLayout) {
-        mediaPlayer?.let {
-            if (isSurfaceAttached) it.detachViews()
-            it.attachViews(videoLayout, null, false, false)
-            isSurfaceAttached = true
-        }
+        mediaPlayer.attachViews(videoLayout, null, false, false)
     }
 
-    fun detachSurface() {
-        mediaPlayer?.detachViews()
-        isSurfaceAttached = false
-    }
-
-    fun isPlaying(): Boolean {
-        return mediaPlayer?.isPlaying == true
-    }
 
     fun playStream(rtspUrl: String) {
-        ensurePlayerInitialized()
-        stopPlayback()
+        val media = Media(libVLC, rtspUrl.toUri())
+        media.setHWDecoderEnabled(true, true)
 
-        media = Media(libVLC, rtspUrl.toUri()).apply {
-            setHWDecoderEnabled(true, true)
-        }
-
-        mediaPlayer?.media = media
-        mediaPlayer?.play()
+        mediaPlayer.media = media
+        mediaPlayer.play()
     }
 
     fun playStreamWithRecording(rtspUrl: String, filePath: String) {
-        ensurePlayerInitialized()
-        stopPlayback()
+        val media = Media(libVLC, rtspUrl.toUri())
 
-        media = Media(libVLC, rtspUrl.toUri()).apply {
-            setHWDecoderEnabled(true, false)
-            addOption(":sout=#duplicate{dst=display,dst=standard{access=file,mux=mp4,dst=$filePath}}")
-            addOption(":sout-keep")
-            addOption(":network-caching=1000")
-        }
+        media.setHWDecoderEnabled(true, false)
 
-        mediaPlayer?.media = media
-        mediaPlayer?.play()
+        // Record + Play simultaneously
+        media.addOption(":sout=#duplicate{dst=display,dst=standard{access=file,mux=mp4,dst=$filePath}}")
+        media.addOption(":sout-keep")
+        media.addOption(":network-caching=1000")
+
+        mediaPlayer.media = media
+        mediaPlayer.play()
     }
+
 
     fun stopPlayback() {
-        mediaPlayer?.apply {
-            stop()
-            detachViews()
-        }
-        media?.release()
-        media = null
-    }
-
-    fun releasePlayer() {
-        mediaPlayer?.release()
-        mediaPlayer = null
-        libVLC?.release()
-        libVLC = null
-    }
-
-    private fun ensurePlayerInitialized() {
-        if (libVLC == null || mediaPlayer == null) {
-            libVLC = LibVLC(context, VLCConfig.getDefaultOptions())
-            mediaPlayer = MediaPlayer(libVLC)
+        if (mediaPlayer.isPlaying) {
+            mediaPlayer.stop()
         }
     }
-}
 
-
-object VLCPlayerManagerSingleton {
-    private var manager: VLCPlayerManager? = null
-
-    fun getInstance(context: Context): VLCPlayerManager {
-        if (manager == null) {
-            manager = VLCPlayerManager(context.applicationContext)
-        }
-        return manager!!
-    }
 }
