@@ -59,3 +59,10 @@ FlightEye is a powerful Android application built with **Kotlin** and **Jetpack 
 - Internet or LAN connection to access stream
 
 ---
+
+🧩 TODOs / Improvements
+ --> Save RTSP URLs for quick access
+ --> RTSP recording feature (stream to file)
+ --> Picture-in-Picture mode support
+ --> Export recordings with share intent
+
