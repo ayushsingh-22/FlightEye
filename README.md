@@ -1,6 +1,7 @@
 # 🎥 FlightEye - RTSP Streaming & Internal Screen Recording App
 
-FlightEye is a powerful Android application built with **Kotlin** and **Jetpack Compose** that enables:
+**FlightEye** is a powerful Android application built with **Kotlin** and **Jetpack Compose** that enables:
+
 - 📡 RTSP video stream playback using **VLC**
 - 🎙️ Internal screen recording with system audio using **MediaProjection + AudioPlaybackCapture**
 - 🧩 RTSP server testing from IP cameras or local devices
@@ -48,12 +49,7 @@ FlightEye is a powerful Android application built with **Kotlin** and **Jetpack 
 ---
 
 ## 📸 Screenshots
-_Add screenshots here showing:_
-- RTSP player screen
-- Start recording button
-- Notification while recording
-- Playback of saved video
-
+![Untitled design](https://github.com/user-attachments/assets/0f36fa03-653a-449a-9526-be2b137592f6)
 ---
 
 ## 📲 Requirements
@@ -65,9 +61,17 @@ _Add screenshots here showing:_
 
 ---
 
-## 🛠️ Setup Instructions
+## 🧩 TODOs / Improvements
 
-1. **Clone the repo**
-   ```bash
-   git clone https://github.com/your-username/flighteye.git
-   cd flighteye
+- [ ] Save RTSP URLs for quick access  
+- [ ] RTSP recording feature (stream to file)  
+- [ ] Picture-in-Picture mode support  
+- [ ] Export recordings with share intent  
+
+---
+
+## 📄 License
+
+Feel free to use, contribute, and modify this app as needed.
+
+---
