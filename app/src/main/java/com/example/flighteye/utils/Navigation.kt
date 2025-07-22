@@ -5,7 +5,7 @@ import androidx.navigation.NavHostController
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import com.example.flighteye.screens.MainScreen
-import com.example.flighteye.screens.PopUpScreen
+import com.example.flighteye.screens.PopupScreen
 
 @Composable
 fun AppNavGraph(navController: NavHostController) {
@@ -18,7 +18,7 @@ fun AppNavGraph(navController: NavHostController) {
         }
 
         composable("popup") {
-            PopUpScreen(navController)
+            PopupScreen(navController)
         }
     }
 }

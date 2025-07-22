@@ -22,6 +22,12 @@ object FileUtils {
     fun createRecordingFile(context: Context): File {
         val timeStamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault()).format(Date())
         val fileName = "recording_$timeStamp.mp4"
-        return File(getDownloadDirectory(), fileName)
+
+        // Use app-specific directory which doesn't need special permissions
+        val directory = context.getExternalFilesDir(Environment.DIRECTORY_MOVIES)
+        if (!directory!!.exists()) {
+            directory.mkdirs()
+        }
+        return File(directory, fileName)
     }
 }

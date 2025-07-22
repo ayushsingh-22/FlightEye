@@ -63,7 +63,6 @@ dependencies {
 
 // Optional: For PiP
     implementation (libs.androidx.annotation)
-
     implementation (libs.androidx.navigation.compose)
 
 
