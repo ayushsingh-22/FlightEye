@@ -10,8 +10,6 @@ import java.util.Locale
 object FileUtils {
 
     private const val FOLDER_NAME = "Flight Eye"
-
-
     private fun getDownloadDirectory(): File {
         val downloadsDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
         val recordingDir = File(downloadsDir, FOLDER_NAME)
