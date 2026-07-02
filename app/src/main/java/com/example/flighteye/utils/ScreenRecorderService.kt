@@ -62,6 +62,7 @@ class ScreenRecorderService : Service() {
         file = FileUtils.createRecordingFile(applicationContext)
 
         mediaRecorder = MediaRecorder().apply {
+            setAudioSource(MediaRecorder.AudioSource.MIC)
             setVideoSource(MediaRecorder.VideoSource.SURFACE)
             setOutputFormat(MediaRecorder.OutputFormat.MPEG_4)
             setOutputFile(file!!.absolutePath)
@@ -86,8 +87,17 @@ class ScreenRecorderService : Service() {
 
     override fun onDestroy() {
         super.onDestroy()
-        mediaRecorder?.stop()
-        mediaRecorder?.reset()
+        try {
+            mediaRecorder?.stop()
+        } catch (e: Exception) {
+            android.util.Log.e("ScreenRecorderService", "Error stopping recorder: ${e.message}")
+        }
+        try {
+            mediaRecorder?.reset()
+            mediaRecorder?.release()
+        } catch (e: Exception) {
+            android.util.Log.e("ScreenRecorderService", "Error releasing recorder: ${e.message}")
+        }
         virtualDisplay?.release()
         mediaProjection?.stop()
     }

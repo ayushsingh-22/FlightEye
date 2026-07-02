@@ -4,6 +4,8 @@ import android.app.PictureInPictureParams
 import android.content.res.Configuration
 import android.os.Build
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.util.Log
 import android.util.Rational
 import android.view.WindowManager
@@ -13,6 +15,7 @@ import androidx.appcompat.app.AppCompatActivity
 import androidx.core.net.toUri
 import com.example.flighteye.player.VLCPlayerManager
 import org.videolan.libvlc.Media
+import org.videolan.libvlc.MediaPlayer
 import org.videolan.libvlc.util.VLCVideoLayout
 
 class PiPActivity : AppCompatActivity() {
@@ -20,98 +23,138 @@ class PiPActivity : AppCompatActivity() {
     private lateinit var videoLayout: VLCVideoLayout
     private lateinit var playerManager: VLCPlayerManager
 
-    // Use a test stream if your actual stream fails
     private val rtspUrl by lazy {
-        intent.getStringExtra("rtsp_url") ?: "rtsp://admin:admin@192.168.31.244:1935"
+        intent.getStringExtra("rtsp_url") ?: ""
     }
 
-    // Fallback stream for testing
-    private val fallbackStream = "rtsp://wowzaec2demo.streamlock.net/vod/mp4:BigBuckBunny_115k.mp4"
-
     private var connectionAttempts = 0
-    private val MAX_ATTEMPTS = 3
+    private val MAX_ATTEMPTS = 5
     private var currentStream = ""
+
+    private var isTransitioningToPiP = false
+    private var streamStarted = false
+    private var retryPending = false
+    private var hasEnteredPiP = false
+
+    private val retryHandler = Handler(Looper.getMainLooper())
+    private val retryRunnable = Runnable {
+        retryPending = false
+        playStream(currentStream)
+    }
+
+    // Auto-enter PiP after stream starts playing
+    private val autoPiPRunnable = Runnable {
+        if (!isInPictureInPictureMode && !isFinishing) {
+            enterPiPMode()
+        }
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
 
-        // Initialize the video layout and set it as content
         videoLayout = VLCVideoLayout(this)
         setContentView(videoLayout)
 
-        // Initialize player manager
         playerManager = VLCPlayerManager(this)
         currentStream = rtspUrl
 
-        // Set up error handling with automatic retry
+        // Set up auto-PiP for Android 12+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            val pipParams = PictureInPictureParams.Builder()
+                .setAspectRatio(Rational(16, 9))
+                .setAutoEnterEnabled(true)
+                .build()
+            setPictureInPictureParams(pipParams)
+        }
+
         playerManager.onError = { error ->
             Log.e(TAG, "Player error: $error")
             connectionAttempts++
 
-            if (connectionAttempts < MAX_ATTEMPTS) {
-                Toast.makeText(this, "Reconnecting... (${connectionAttempts}/${MAX_ATTEMPTS})", Toast.LENGTH_SHORT).show()
-
-                // Try reconnecting after a delay
-                videoLayout.postDelayed({
-                    playStream(currentStream)
-                }, 2000)
-            } else if (currentStream != fallbackStream) {
-                // Switch to fallback stream after max attempts
-                Toast.makeText(this, "Switching to test stream...", Toast.LENGTH_SHORT).show()
-                currentStream = fallbackStream
-                connectionAttempts = 0
-
-                videoLayout.postDelayed({
-                    playStream(currentStream)
-                }, 1000)
-            } else {
-                Toast.makeText(this, "Could not connect to any stream", Toast.LENGTH_SHORT).show()
-                finish()
+            when {
+                connectionAttempts < MAX_ATTEMPTS -> {
+                    val delay = (connectionAttempts * 2000L).coerceAtMost(5000L)
+                    Log.d(TAG, "Reconnecting in ${delay}ms ($connectionAttempts/$MAX_ATTEMPTS)")
+                    if (!isInPictureInPictureMode) {
+                        Toast.makeText(
+                            this,
+                            "Reconnecting… ($connectionAttempts/$MAX_ATTEMPTS)",
+                            Toast.LENGTH_SHORT
+                        ).show()
+                    }
+                    retryHandler.removeCallbacks(retryRunnable)
+                    retryPending = true
+                    retryHandler.postDelayed(retryRunnable, delay)
+                }
+                else -> {
+                    if (!isInPictureInPictureMode) {
+                        Toast.makeText(this, "Could not connect to stream", Toast.LENGTH_LONG).show()
+                    }
+                    Log.w(TAG, "Max retry attempts reached")
+                }
             }
         }
 
-        // Handle back button press for modern Android versions
         onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
             override fun handleOnBackPressed() {
                 enterPiPMode()
             }
         })
 
-        // Attach surface and start playback
         playerManager.attachSurface(videoLayout)
         startPlayback()
+
+        // Auto-enter PiP after a brief delay to allow surface initialization
+        retryHandler.postDelayed(autoPiPRunnable, 1500)
+    }
+
+    /**
+     * Extracts credentials from RTSP URL (same logic as VLCPlayerManager).
+     */
+    private fun extractCredentials(url: String): Pair<String, Pair<String, String>?> {
+        val regex = Regex("^(rtsp://)([^:/@]+):([^@/]+)@(.+)$")
+        val match = regex.matchEntire(url) ?: return url to null
+        val (scheme, user, pass, host) = match.destructured
+        return "$scheme$host" to (user to pass)
     }
 
     private fun playStream(streamUrl: String) {
-        try {
-            Log.d(TAG, "Starting stream from: $streamUrl")
+        if (streamUrl.isBlank()) {
+            Log.w(TAG, "No stream URL provided")
+            return
+        }
 
-            // Stop any existing playback
+        retryHandler.removeCallbacks(retryRunnable)
+        retryPending = false
+
+        try {
+            val (cleanUrl, creds) = extractCredentials(streamUrl)
+            Log.d(TAG, "Starting stream from: $cleanUrl")
             playerManager.stopPlayback()
 
-            val media = Media(playerManager.libVLC, streamUrl.toUri())
-
-            // Enhanced playback options for better PiP performance
+            val media = Media(playerManager.libVLC, cleanUrl.toUri())
             media.setHWDecoderEnabled(true, false)
-
-            // Add all PiP-specific options to the media directly
-            media.addOption(":network-caching=5000")
-            media.addOption(":live-caching=5000")
+            media.addOption(":network-caching=300")
+            media.addOption(":live-caching=300")
             media.addOption(":rtsp-tcp")
-            media.addOption(":rtsp-timeout=10000")
+            media.addOption(":rtsp-timeout=15000")
             media.addOption(":rtsp-frame-buffer-size=600000")
             media.addOption(":avcodec-hw=any")
-            media.addOption(":file-caching=5000")
             media.addOption(":clock-jitter=0")
+            media.addOption(":clock-synchro=0")
             media.addOption(":no-audio")
-            media.addOption(":video-filter=none")
+
+            creds?.let { (u, p) ->
+                media.addOption(":rtsp-user=$u")
+                media.addOption(":rtsp-pwd=$p")
+            }
 
             playerManager.mediaPlayer.media = media
             media.release()
             playerManager.mediaPlayer.play()
-
-            Log.d(TAG, "Playback started with URL: $streamUrl")
+            streamStarted = true
+            Log.d(TAG, "Playback started")
         } catch (e: Exception) {
             Log.e(TAG, "Failed to play stream: ${e.message}")
             playerManager.onError?.invoke("Failed to play stream: ${e.message}")
@@ -119,6 +162,7 @@ class PiPActivity : AppCompatActivity() {
     }
 
     private fun startPlayback() {
+        connectionAttempts = 0
         playStream(currentStream)
     }
 
@@ -130,32 +174,28 @@ class PiPActivity : AppCompatActivity() {
     private fun enterPiPMode() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             try {
-                Log.d(TAG, "Attempting to enter PiP mode. Is playing: ${playerManager.isPlaying()}")
-
-                // Don't enter PiP if we're not playing anything
-                if (!playerManager.isPlaying()) {
-                    Log.d(TAG, "Not entering PiP mode, no active stream")
-                    return
-                }
-
-                val aspectRatio = Rational(16, 9)
+                isTransitioningToPiP = true
                 val pipParams = PictureInPictureParams.Builder()
-                    .setAspectRatio(aspectRatio)
+                    .setAspectRatio(Rational(16, 9))
+                    .apply {
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                            setAutoEnterEnabled(true)
+                        }
+                    }
                     .build()
-
                 enterPictureInPictureMode(pipParams)
-                Log.d(TAG, "Successfully entered PiP mode")
+                hasEnteredPiP = true
+                Log.d(TAG, "Entered PiP mode")
             } catch (e: Exception) {
+                isTransitioningToPiP = false
                 Log.e(TAG, "Failed to enter PiP mode: ${e.message}", e)
-                Toast.makeText(this, "Failed to enter PiP mode", Toast.LENGTH_SHORT).show()
             }
         }
     }
 
     override fun onResume() {
         super.onResume()
-        if (!playerManager.isPlaying()) {
-            // Reset connection attempts on resume
+        if (!playerManager.isPlaying() && !retryPending && streamStarted) {
             connectionAttempts = 0
             playStream(currentStream)
             Log.d(TAG, "Resuming playback")
@@ -164,39 +204,27 @@ class PiPActivity : AppCompatActivity() {
 
     override fun onPause() {
         super.onPause()
-        // Important: Don't stop playback when in PiP mode
-        if (!isInPictureInPictureMode) {
-            Log.d(TAG, "Activity paused, stopping playback")
+        if (!isInPictureInPictureMode && !isTransitioningToPiP) {
+            retryHandler.removeCallbacks(retryRunnable)
+            retryHandler.removeCallbacks(autoPiPRunnable)
             playerManager.stopPlayback()
-        } else {
-            Log.d(TAG, "Activity paused but in PiP mode, continuing playback")
-        }
-    }
-
-    // This is deprecated but kept for compatibility with older Android versions
-    @Suppress("DEPRECATION")
-    override fun onBackPressed() {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) {
-            enterPiPMode()
-        } else {
-            super.onBackPressed()
+            Log.d(TAG, "Activity paused, playback stopped")
         }
     }
 
     override fun onStop() {
         super.onStop()
-        if (!isInPictureInPictureMode) {
+        if (!isInPictureInPictureMode && !isTransitioningToPiP) {
             playerManager.stopPlayback()
-            Log.d(TAG, "Activity stopped, stopping playback")
-        } else {
-            Log.d(TAG, "Activity stopped but in PiP mode, continuing playback")
         }
     }
 
     override fun onDestroy() {
         super.onDestroy()
+        retryHandler.removeCallbacks(retryRunnable)
+        retryHandler.removeCallbacks(autoPiPRunnable)
         playerManager.release()
-        Log.d(TAG, "PiPActivity destroyed, resources released")
+        Log.d(TAG, "PiPActivity destroyed")
     }
 
     override fun onPictureInPictureModeChanged(
@@ -204,17 +232,30 @@ class PiPActivity : AppCompatActivity() {
         newConfig: Configuration
     ) {
         super.onPictureInPictureModeChanged(isInPictureInPictureMode, newConfig)
+        isTransitioningToPiP = false
         Log.d(TAG, "PiP mode changed: $isInPictureInPictureMode")
 
         if (!isInPictureInPictureMode) {
-            // If exiting PiP mode, stop playback and close activity
+            // User dismissed PiP or tapped to expand → close
+            retryHandler.removeCallbacks(retryRunnable)
             playerManager.stopPlayback()
             finish()
         } else {
-            // Critical: Restart the stream when entering PiP mode to avoid black screen
+            // Entered PiP — restart stream only if it dropped
             connectionAttempts = 0
-            playStream(currentStream)
-            Log.d(TAG, "Restarted stream in PiP mode")
+            if (!playerManager.isPlaying()) {
+                Log.d(TAG, "Stream not active in PiP, restarting")
+                playStream(currentStream)
+            }
+        }
+    }
+
+    @Suppress("DEPRECATION")
+    override fun onBackPressed() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) {
+            enterPiPMode()
+        } else {
+            super.onBackPressed()
         }
     }
 }

@@ -5,6 +5,7 @@
 
     <!-- Permissions -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PROJECTION" />
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
@@ -43,9 +44,11 @@
         <activity
             android:name=".activity.PiPActivity"
             android:supportsPictureInPicture="true"
-            android:launchMode="singleTask"
+            android:launchMode="singleTop"
             android:configChanges="screenSize|smallestScreenSize|screenLayout|orientation"
             android:resizeableActivity="true"
+            android:excludeFromRecents="true"
+            android:taskAffinity=""
             android:theme="@style/Theme.AppCompat.NoActionBar" />
 
         <!-- Screen Recording Foreground Service -->

@@ -1,6 +1,8 @@
 package com.example.flighteye.player
 
 import android.content.Context
+import android.os.Handler
+import android.os.Looper
 import android.util.Log
 import androidx.core.net.toUri
 import org.videolan.libvlc.LibVLC
@@ -13,49 +15,54 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
-class VLCPlayerManager(private val context: Context) {
+class VLCPlayerManager(context: Context) {
+    // Use applicationContext to avoid holding a reference to any Activity.
+    private val appContext = context.applicationContext
+
     companion object {
         private const val TAG = "VLCPlayerManager"
-        private const val FOLDER_NAME = "Flight Eye"
+        private const val FOLDER_NAME = "FlightEye"
     }
 
-    var libVLC: LibVLC = LibVLC(context, VLCConfig.getDefaultOptions())
-    var mediaPlayer: MediaPlayer = MediaPlayer(libVLC)
+    // libVLC is heavy to construct — defer initialization until first use on a background call site.
+    // Public accessors trigger lazy creation; the underlying Media/MediaPlayer are always accessed
+    // via these getters so callers never touch the field before it's ready.
+    val libVLC: LibVLC by lazy { LibVLC(appContext, VLCConfig.getDefaultOptions()) }
+    val mediaPlayer: MediaPlayer by lazy {
+        MediaPlayer(libVLC).also { attachEventListener(it) }
+    }
 
     private var isRecording = false
     private var currentRecordingPath: String? = null
     var onRecordingStopped: ((String) -> Unit)? = null
     var onError: ((String) -> Unit)? = null
 
-    init {
-        mediaPlayer.setEventListener { event ->
-            when (event.type) {
-                MediaPlayer.Event.EncounteredError -> {
-                    // Change from event.lengthChanged to a more descriptive message
-                    val errorMsg = "VLC playback error: Connection failed"
-                    Log.e(TAG, errorMsg)
-                    onError?.invoke(errorMsg)
-                    if (isRecording && currentRecordingPath != null) {
-                        Log.e(TAG, "Recording failed for: $currentRecordingPath")
+    // All event callbacks must run on the main thread (Toast, UI state, etc.)
+    private val mainHandler = Handler(Looper.getMainLooper())
+
+    private fun attachEventListener(player: MediaPlayer) {
+        player.setEventListener { event ->
+            mainHandler.post {
+                when (event.type) {
+                    MediaPlayer.Event.EncounteredError -> {
+                        val errorMsg = "VLC playback error: Connection failed"
+                        Log.e(TAG, errorMsg)
+                        if (isRecording && currentRecordingPath != null) {
+                            Log.e(TAG, "Recording failed for: $currentRecordingPath")
+                        }
+                        isRecording = false
+                        onError?.invoke(errorMsg)
                     }
-                    isRecording = false
-                    onError?.invoke(errorMsg)
-                }
-                MediaPlayer.Event.EndReached, MediaPlayer.Event.Stopped -> {
-                    if (isRecording && currentRecordingPath != null) {
-                        Log.d(TAG, "Recording completed and saved to: $currentRecordingPath")
-                        onRecordingStopped?.invoke(currentRecordingPath!!)
+                    MediaPlayer.Event.EndReached, MediaPlayer.Event.Stopped -> {
+                        if (isRecording && currentRecordingPath != null) {
+                            Log.d(TAG, "Recording completed and saved to: $currentRecordingPath")
+                            onRecordingStopped?.invoke(currentRecordingPath!!)
+                        }
+                        isRecording = false
                     }
-                    isRecording = false
-                }
-                MediaPlayer.Event.Opening -> {
-                    Log.d(TAG, "Media opening...")
-                }
-                MediaPlayer.Event.Playing -> {
-                    Log.d(TAG, "Media playing...")
-                }
-                MediaPlayer.Event.Buffering -> {
-                    Log.d(TAG, "Media buffering: ${event.buffering}%")
+                    MediaPlayer.Event.Opening -> Log.d(TAG, "Media opening...")
+                    MediaPlayer.Event.Playing -> Log.d(TAG, "Media playing...")
+                    MediaPlayer.Event.Buffering -> Log.d(TAG, "Media buffering: ${event.buffering}%")
                 }
             }
         }
@@ -80,31 +87,48 @@ class VLCPlayerManager(private val context: Context) {
         }
     }
 
+    /**
+     * Strips `user:password@` from RTSP URL and returns a Pair of (cleanUrl, credentials?).
+     * VLC deprecated in-URL credentials; use --rtsp-user / --rtsp-pwd options instead.
+     */
+    private fun extractCredentials(url: String): Pair<String, Pair<String, String>?> {
+        val regex = Regex("^(rtsp://)([^:/@]+):([^@/]+)@(.+)$")
+        val match = regex.matchEntire(url) ?: return url to null
+        val (scheme, user, pass, host) = match.destructured
+        return "$scheme$host" to (user to pass)
+    }
+
     fun playStream(rtspUrl: String) {
         stopPlayback()
         isRecording = false
 
         try {
-            Log.d(TAG, "Starting stream from: $rtspUrl")
-            val media = Media(libVLC, rtspUrl.toUri())
+            val (cleanUrl, creds) = extractCredentials(rtspUrl)
+            Log.d(TAG, "Starting stream from: $cleanUrl")
+            val media = Media(libVLC, cleanUrl.toUri())
 
-            // Set hardware acceleration
             media.setHWDecoderEnabled(true, false)
 
-            // Add more robust connection options
-            media.addOption(":network-caching=3000")  // Increased from 1500
-            media.addOption(":live-caching=3000")     // Increased from 1500
-            media.addOption(":rtsp-tcp")              // Force TCP mode
-            media.addOption(":rtsp-timeout=10000")    // Longer timeout
-            media.addOption(":rtsp-frame-buffer-size=600000") // Larger buffer
-            media.addOption(":avcodec-hw=any")        // Hardware acceleration
-            media.addOption(":file-caching=3000")     // File caching
+            // Low-latency options for live streams
+            media.addOption(":network-caching=300")
+            media.addOption(":live-caching=300")
+            media.addOption(":rtsp-tcp")
+            media.addOption(":rtsp-timeout=15000")
+            media.addOption(":rtsp-frame-buffer-size=600000")
+            media.addOption(":avcodec-hw=any")
+            media.addOption(":file-caching=300")
+            media.addOption(":clock-jitter=0")
+            media.addOption(":clock-synchro=0")
 
-            // Set the media and play
+            creds?.let { (u, p) ->
+                media.addOption(":rtsp-user=$u")
+                media.addOption(":rtsp-pwd=$p")
+            }
+
             mediaPlayer.media = media
             media.release()
             mediaPlayer.play()
-            Log.d(TAG, "Attempting to connect to stream: $rtspUrl")
+            Log.d(TAG, "Attempting to connect to stream")
         } catch (e: Exception) {
             Log.e(TAG, "Error playing stream: ${e.message}")
             onError?.invoke("Connection failed: ${e.message}")
@@ -119,7 +143,7 @@ class VLCPlayerManager(private val context: Context) {
             val timeStamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault()).format(Date())
             val fileName = "FlightEye_$timeStamp.mp4"
 
-            // Use Downloads/Flight Eye directory
+            // Use Downloads/FlightEye directory
             val downloadsDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
             val recordingDir = File(downloadsDir, FOLDER_NAME)
             if (!recordingDir.exists()) {
@@ -131,25 +155,30 @@ class VLCPlayerManager(private val context: Context) {
 
             Log.d(TAG, "Will save recording to: $recordingPath")
 
-            val media = Media(libVLC, rtspUrl.toUri())
+            val formattedPath = recordingPath.replace(" ", "%20")
+
+            val (cleanUrl, creds) = extractCredentials(rtspUrl)
+            val media = Media(libVLC, cleanUrl.toUri())
             media.setHWDecoderEnabled(true, false)
 
             // Connection settings
-            media.addOption(":rtsp-tcp")  // Force RTSP over TCP
-            media.addOption(":rtsp-timeout=5000")
+            media.addOption(":rtsp-tcp")
+            media.addOption(":rtsp-timeout=15000")
             media.addOption(":rtsp-frame-buffer-size=500000")
+            media.addOption(":network-caching=300")
+            media.addOption(":live-caching=300")
+            media.addOption(":clock-jitter=0")
+            media.addOption(":clock-synchro=0")
 
-            // Recording settings with Windows path fix
-            val formattedPath = recordingPath.replace("\\", "/")
-            media.addOption(":sout=#duplicate{dst=display,dst=file{dst='$formattedPath',mux=mp4,access=file}}")
+            creds?.let { (u, p) ->
+                media.addOption(":rtsp-user=$u")
+                media.addOption(":rtsp-pwd=$p")
+            }
+
+            // Recording sout: duplicate stream to display and file
+            media.addOption(":sout=#duplicate{dst=display,dst=std{access=file,mux=mp4,dst=$formattedPath}}")
             media.addOption(":sout-all")
             media.addOption(":sout-keep")
-
-            // Buffering and sync settings
-            media.addOption(":network-caching=1500")
-            media.addOption(":clock-jitter=0")
-            media.addOption(":live-caching=1500")
-            media.addOption(":clock-synchro=0")
 
             // Set the media and play
             mediaPlayer.media = media

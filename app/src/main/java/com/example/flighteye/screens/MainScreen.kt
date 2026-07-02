@@ -68,7 +68,7 @@ fun MainScreen(navController: NavController) {
     }
 
     // State variables
-    var rtspUrl by rememberSaveable { mutableStateOf("rtsp://admin:admin@192.168.31.244:1935") }
+    var rtspUrl by rememberSaveable { mutableStateOf("rtsp") }
     var isPlaying by rememberSaveable { mutableStateOf(false) }
     var isRecording by rememberSaveable { mutableStateOf(false) }
     var currentRecordingPath by rememberSaveable { mutableStateOf<String?>(null) }
@@ -89,7 +89,18 @@ fun MainScreen(navController: NavController) {
         playerManager.onError = { error ->
             Log.e(TAG, "Player error: $error")
             errorMessage = error
-            Toast.makeText(context, "Error: $error", Toast.LENGTH_SHORT).show()
+            // Auto-retry once after 2 seconds on connection failure
+            if (isPlaying && error.contains("Connection failed", ignoreCase = true)) {
+                videoLayout.postDelayed({
+                    if (rtspUrl.isNotBlank()) {
+                        Log.d(TAG, "Auto-retrying stream connection...")
+                        errorMessage = "Reconnecting…"
+                        playerManager.playStream(rtspUrl)
+                    }
+                }, 2500)
+            } else {
+                Toast.makeText(context, "Error: $error", Toast.LENGTH_SHORT).show()
+            }
         }
     }
 
@@ -250,7 +261,12 @@ fun MainScreen(navController: NavController) {
             Button(
                 modifier = Modifier.fillMaxWidth(),
                 onClick = {
-                    navController.navigate("popup")
+                    if (rtspUrl.isBlank()) {
+                        Toast.makeText(context, "Please enter a valid RTSP URL", Toast.LENGTH_SHORT).show()
+                        return@Button
+                    }
+                    val encoded = java.net.URLEncoder.encode(rtspUrl, "UTF-8")
+                    navController.navigate("popup/$encoded")
                 }) {
                 Text("Pop-Up View")
             }
